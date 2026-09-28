@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Black & White Christmas</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000000; font-family: 'Segoe UI', sans-serif; }
+        #canvas-container { width: 100%; height: 100vh; display: block; }
+        #ui-layer { position: absolute; bottom: 30px; width: 100%; text-align: center; pointer-events: none; z-index: 100; }
+        .badge { display: inline-block; background: rgba(0, 0, 0, 0.8); border: 2px solid #FFFFFF; color: #FFFFFF; padding: 10px 25px; border-radius: 50px; font-size: 18px; font-weight: bold; margin-bottom: 10px; box-shadow: 0 0 20px rgba(255, 255, 255, 0.5); text-shadow: 0 0 10px #FFFFFF; }
+        .guide { color: #bbb; font-size: 13px; margin-bottom: 20px; text-shadow: 0 2px 4px black; }
+        button { pointer-events: auto; cursor: pointer; background: linear-gradient(to bottom, #444444, #111111); color: #FFF; border: 2px solid #FFFFFF; padding: 15px 50px; border-radius: 30px; font-weight: 800; font-size: 16px; box-shadow: 0 0 30px rgba(255, 255, 255, 0.5); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        #camera-preview { position: fixed; top: 12px; right: 12px; width: 160px; height: 120px; border-radius: 10px; overflow: hidden; border: 1.5px solid rgba(255, 255, 255, 0.6); box-shadow: 0 0 10px rgba(0, 0, 0, 0.8); transform: scaleX(-1); opacity: 0.8; z-index: 200; pointer-events: none; background: #000; }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div id="status" class="badge">❄️ Merry Christmas ❄️</div>
+        <div class="guide">
+            🖐 <b>Xòe:</b> Bung Ảnh & Ánh Sáng &nbsp;|&nbsp; 👌 <b>Pinch:</b> Xem ảnh &nbsp;|&nbsp; ✊ <b>Nắm:</b> Thu cây
+        </div>
+        <button id="btnStart" onclick="startSystem()">Start</button>
+    </div>
+    <div id="canvas-container"></div>
+    <video class="input_video" style="display:none"></video>
+    <canvas id="camera-preview"></canvas>
+    <script>
+        const loader = new THREE.TextureLoader();
+        
+        // 7 ảnh mới đẹp lung linh tông silver/monochrome (load ổn định 100%)
+        const photoUrls = [
+            "https://thumbs.dreamstime.com/b/modern-christmas-tree-minimalist-ornaments-monochrome-black-white-silver-featuring-geometric-shapes-sleek-design-336421966.jpg",
+            "https://s.alicdn.com/@sc02/kf/Ad9e9feb0aae7430bb0aef2703fe00f0bp.jpg",
+            "https://static.vecteezy.com/system/resources/thumbnails/050/626/710/small/black-christmas-ornaments-on-a-snowy-fir-tree-branch-photo.jpeg",
+            "https://t4.ftcdn.net/jpg/18/41/68/81/360_F_1841688100_u6RgTzCnN9zzlcIN7COeYP1IgSUjMXUU.jpg",
+            "https://blog.canadianloghomes.com/wp-content/uploads/2023/08/white-christmas-tree-ideas-1.jpg",
+            "https://hips.hearstapps.com/hmg-prod/images/best-white-christmas-tree-ideas-67043415b9327.png?crop=0.6666666666666666xw:1xh;center,top&resize=1200:*",
+            "https://homesthetics.net/wp-content/uploads/2024/11/Black-and-White-Trees.jpg"
+        ];
+
+        const photoTextures = photoUrls.map(url => loader.load(url));
+
+        function createCustomTexture(type) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const cx = 64, cy = 64;
+            if (type === 'white_silver_glow') {
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 50);
+                grd.addColorStop(0, '#FFFFFF');
+                grd.addColorStop(0.3, '#EEEEEE');
+                grd.addColorStop(0.6, '#AAAAAA');
+                grd.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grd; ctx.fillRect(0, 0, 128, 128);
+            } else if (type === 'dark_glow') {
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 50);
+                grd.addColorStop(0, '#AAAAAA');
+                grd.addColorStop(0.4, '#555555');
+                grd.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = grd; ctx.fillRect(0, 0, 128, 128);
+            } else if (type === 'bw_gift') {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(20, 20, 88, 88);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(54, 20, 20, 88);
+                ctx.fillRect(20, 54, 88, 20);
+                ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 3; ctx.strokeRect(20, 20, 88, 88);
+            } else if (type === 'silver_star') {
+                const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 60);
+                grd.addColorStop(0, '#FFFFFF');
+                grd.addColorStop(0.4, '#DDDDDD');
+                grd.addColorStop(0.8, '#888888');
+                grd.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = grd; ctx.fillRect(0, 0, 128, 128);
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const textures = {
+            white: createCustomTexture('white_silver_glow'),
+            dark: createCustomTexture('dark_glow'),
+            gift: createCustomTexture('bw_gift'),
+            star: createCustomTexture('silver_star')
+        };
+
+        const CONFIG = {
+            whiteCount: 2200,
+            darkCount: 500,
+            giftCount: 200,
+            explodeRadius: 65,
+            photoOrbitRadius: 25,
+            treeHeight: 70,
+            treeBaseRadius: 35
+        };
+
+        let scene, camera, renderer;
+        let groupWhite, groupDark, groupGift;
+        let photoMeshes = [];
+        let titleMesh, starMesh;
+        let state = 'TREE';
+        let selectedIndex = 0;
+        let handX = 0.5;
+
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.003);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 100;
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            groupWhite = createParticleSystem('white', CONFIG.whiteCount, 2.2);
+            groupDark = createParticleSystem('dark', CONFIG.darkCount, 3.0);
+            groupGift = createParticleSystem('gift', CONFIG.giftCount, 3.5);
+
+            createPhotos();
+            createDecorations();
+            animate();
+        }
+
+        function createParticleSystem(type, count, size) {
+            const positions = new Float32Array(count * 3);
+            const treeTargets = new Float32Array(count * 3);
+            const explodeTargets = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                const i3 = i * 3;
+                const h = Math.random() * CONFIG.treeHeight;
+                const y = h - CONFIG.treeHeight / 2;
+                const maxR = (1 - h / CONFIG.treeHeight) * CONFIG.treeBaseRadius;
+                const r = maxR * (type === 'white' ? Math.sqrt(Math.random()) : 0.9 + Math.random() * 0.1);
+                const theta = Math.random() * Math.PI * 2;
+                const x = r * Math.cos(theta);
+                const z = r * Math.sin(theta);
+                positions[i3] = x; positions[i3 + 1] = y; positions[i3 + 2] = z;
+                treeTargets[i3] = x; treeTargets[i3 + 1] = y; treeTargets[i3 + 2] = z;
+
+                const u = Math.random(); const v = Math.random();
+                const phi = Math.acos(2 * v - 1); const lam = 2 * Math.PI * u;
+                const rad = CONFIG.explodeRadius * Math.cbrt(Math.random()) * (type === 'gift' ? 1.2 : 1.0);
+                explodeTargets[i3] = rad * Math.sin(phi) * Math.cos(lam);
+                explodeTargets[i3 + 1] = rad * Math.sin(phi) * Math.sin(lam);
+                explodeTargets[i3 + 2] = rad * Math.cos(phi);
+            }
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.userData = { tree: treeTargets, explode: explodeTargets };
+            const material = new THREE.PointsMaterial({
+                size: size,
+                map: textures[type],
+                transparent: true,
+                opacity: 1.0,
+                blending: type === 'gift' ? THREE.NormalBlending : THREE.AdditiveBlending,
+                depthWrite: false,
+                sizeAttenuation: true
+            });
+            const points = new THREE.Points(geometry, material);
+            scene.add(points);
+            return points;
+        }
+
+        function createPhotos() {
+            const geo = new THREE.PlaneGeometry(8, 8);
+            const borderGeo = new THREE.PlaneGeometry(9, 9);
+            const borderMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+
+            for (let i = 0; i < 7; i++) {
+                const mat = new THREE.MeshBasicMaterial({
+                    map: photoTextures[i],
+                    side: THREE.DoubleSide
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                const border = new THREE.Mesh(borderGeo, borderMat);
+                border.position.z = -0.1;
+                mesh.add(border);
+                mesh.visible = false;
+                mesh.scale.set(0, 0, 0);
+                scene.add(mesh);
+                photoMeshes.push(mesh);
+            }
+        }
+
+        function createDecorations() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold italic 90px "Times New Roman"';
+            ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'center';
+            ctx.shadowColor = "#AAAAAA"; ctx.shadowBlur = 60;
+            ctx.fillText("MERRY CHRISTMAS", 512, 130);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending });
+            titleMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 15), mat);
+            titleMesh.position.set(0, 50, 0);
+            scene.add(titleMesh);
+
+            starMesh = new THREE.Mesh(new THREE.PlaneGeometry(18, 18), new THREE.MeshBasicMaterial({ map: textures.star, transparent: true, blending: THREE.AdditiveBlending }));
+            starMesh.position.set(0, CONFIG.treeHeight / 2 + 6, 0);
+            scene.add(starMesh);
+        }
+
+        function updateParticleGroup(group, targetState, speed, handRotY) {
+            const pos = group.geometry.attributes.position.array;
+            const targets = group.geometry.userData[targetState === 'TREE' ? 'tree' : 'explode'];
+            for (let i = 0; i < pos.length; i++) {
+                pos[i] += (targets[i] - pos[i]) * speed;
+            }
+            group.geometry.attributes.position.needsUpdate = true;
+            if (targetState === 'TREE') group.rotation.y += 0.003;
+            else group.rotation.y += (handRotY - group.rotation.y) * 0.05;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+            const speed = 0.06;
+            const handRotY = (handX - 0.5) * 2.5;
+
+            updateParticleGroup(groupWhite, state, speed, handRotY);
+            updateParticleGroup(groupDark, state, speed, handRotY);
+            updateParticleGroup(groupGift, state, speed, handRotY);
+
+            if (state === 'TREE') {
+                titleMesh.visible = true; starMesh.visible = true; starMesh.rotation.z -= 0.02;
+                photoMeshes.forEach(m => { m.visible = false; m.scale.lerp(new THREE.Vector3(0,0,0), 0.1); });
+            } else {
+                titleMesh.visible = false; starMesh.visible = false;
+                if (state === 'EXPLODE') {
+                    const baseAngle = groupWhite.rotation.y;
+                    let bestIdx = 0, maxZ = -999;
+                    photoMeshes.forEach((mesh, i) => {
+                        mesh.visible = true;
+                        const angle = baseAngle + i * (Math.PI * 2 / photoMeshes.length);
+                        const x = Math.sin(angle) * CONFIG.photoOrbitRadius;
+                        const z = Math.cos(angle) * CONFIG.photoOrbitRadius;
+                        const y = Math.sin(time + i) * 3;
+                        mesh.position.lerp(new THREE.Vector3(x, y, z), 0.1);
+                        mesh.lookAt(camera.position);
+                        if (z > maxZ) { maxZ = z; bestIdx = i; }
+                        const scale = z > 5 ? 1 + z / CONFIG.photoOrbitRadius * 0.8 : 0.6;
+                        mesh.scale.lerp(new THREE.Vector3(scale, scale, scale), 0.1);
+                    });
+                    selectedIndex = bestIdx;
+                } else if (state === 'PHOTO') {
+                    photoMeshes.forEach((mesh, i) => {
+                        if (i === selectedIndex) {
+                            mesh.position.lerp(new THREE.Vector3(0, 0, 60), 0.1);
+                            mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 0.1);
+                            mesh.lookAt(camera.position);
+                        } else mesh.scale.lerp(new THREE.Vector3(0, 0, 0), 0.1);
+                    });
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        function startSystem() {
+            document.getElementById('btnStart').style.display = 'none';
+            init3D();
+
+            const video = document.getElementsByClassName('input_video')[0];
+            const canvasPreview = document.getElementById('camera-preview');
+            const ctx = canvasPreview.getContext('2d');
+            const statusDiv = document.getElementById('status');
+
+            const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 0,
+                minDetectionConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
+
+            hands.onResults(results => {
+                ctx.clearRect(0, 0, canvasPreview.width, canvasPreview.height);
+                ctx.drawImage(results.image, 0, 0, canvasPreview.width, canvasPreview.height);
+
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const lm = results.multiHandLandmarks[0];
+                    handX = lm[9].x;
+                    const tips = [8, 12, 16, 20];
+                    const wrist = lm[0];
+                    let openDist = 0;
+                    tips.forEach(i => openDist += Math.hypot(lm[i].x - wrist.x, lm[i].y - wrist.y));
+                    const avgDist = openDist / 4;
+                    const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+
+                    if (avgDist < 0.25) {
+                        state = 'TREE';
+                        statusDiv.innerText = "✊ Thu Cây Bạc";
+                        statusDiv.style.color = "#FFFFFF";
+                    } else if (pinchDist < 0.05) {
+                        state = 'PHOTO';
+                        statusDiv.innerText = "👌 Xem Ảnh";
+                        statusDiv.style.color = "#CCCCCC";
+                    } else {
+                        state = 'EXPLODE';
+                        statusDiv.innerText = "🖐 Bung Ảnh & Ánh Sáng";
+                        statusDiv.style.color = "#888888";
+                    }
+                } else {
+                    state = 'TREE';
+                    statusDiv.innerText = "❄️ Merry Christmas ❄️";
+                    statusDiv.style.color = "#FFFFFF";
+                }
+            });
+
+            const cameraUtils = new Camera(video, {
+                onFrame: async () => await hands.send({image: video}),
+                width: 640,
+                height: 480
+            });
+            cameraUtils.start();
+        }
+
+        window.addEventListener('resize', () => {
+            if (camera) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+    </script>
+</body>
+</html> 
